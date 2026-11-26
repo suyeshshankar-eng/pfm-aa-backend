@@ -1,0 +1,34 @@
+{
+  "manifestSchemaVersion": "v0",
+  "id": "kaushal-agent-test.pfm-agent.v1",
+  "name": "PFM Categorisation Agent",
+  "publisher": "kaushal-agent-test",
+  "servedPrincipals": ["kaushal-agent-test"],
+  "replyRecipients": ["kaushal-agent-test"],
+  "deploymentFingerprint": "oci://asia-south1-docker.pkg.dev/airlock-confidential-space/sahamati-staging/pfm-agent@sha256:816a8ba914343edda8651c9e8e5e13974db26bac1293cb6f0c42b3ab779772e8",
+  "modelBinding": "pfm-student-logreg-v1 (distilled from gemma-4-E4B-it-Q4_K_M)",
+  "egress": [],
+  "signedRequest": "required",
+  "rebitServers": [
+    {
+      "host": "sandbox-aa-airlock.sahamati.org.in",
+      "tokenHost": "sandbox-aa-airlock.sahamati.org.in",
+      "purposes": ["103"],
+      "specVersion": "2.0.0"
+    }
+  ],
+  "consentSigner": "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAq6ZkLrtngtAo4u6VQkud\nAIVBEll5dw+g3WMRSUtf2NahSW3rXHy1mQoe4ZD6kPLWlqsr21OwID3SbB40Lj4i\nAezYhnkl9Po2LkVkiQFqouOY5hHiZPoSU9f3gYaWQdVfAVChPPQ9BWvV83/1CRX/\nelEaXPGUjca+i9SdpgHELNXtqlCfhAxh9VQaEzS+WKl1otbFZjACG5ciyU+ibh24\nblFPHrPzYQRJtF4OM7bAUj1upyD4jgoKnKjSX/k/miC83wEOPvBUt2XIhJu2BZsE\n4gDwnXr+s+L7Naw++qinO48Z/fPpHxYA+AC65MjKQDRd1Gs4QA6BgzNzEBAc6NC7\nhwIDAQAB\n-----END PUBLIC KEY-----\n",
+  "processingClasses": ["personal-finance-insights"],
+  "dataScopes": ["deposit account statements", "transaction narrations", "account aggregator consent artifact"],
+  "sideEffectClass": "derive-only",
+  "permittedChildren": [],
+  "mcpServers": [],
+  "intent": {
+    "statement": "Categorise one customer's consented bank statement and summarise spending, saving and cash flow for that customer.",
+    "permittedActions": ["categorise the consented statement's transactions", "return spending, saving and cash-flow insights"],
+    "prohibitedActions": ["retain or export the statement after the run", "contact the customer or any third party", "make a credit decision"],
+    "humanApproval": { "required": false, "forActions": [], "approver": "not required" },
+    "authority": { "grantedAt": "2026-11-20T00:00:00Z", "expiresAt": "2027-11-20T00:00:00Z" },
+    "runtimeBudget": { "maxSteps": 8, "maxRepeatedToolCalls": 3 }
+  }
+}

@@ -1,0 +1,3 @@
+httpx==0.28.1
+numpy==2.4.6
+octichq-airlock-sdk==0.2.0

@@ -26,6 +26,7 @@
  * whole Airlock flow as the FIU's system and returns the opened reply, so unlike
  * the relay it DOES see the insights (the reply is sealed to the org's key).
  *   POST /v1/runs             { consentId? }                → 202 { id }
+ *   GET  /v1/runs                                           → { runs: [{ id, status, stage, answer?, evidence?, error? }] } newest first, this customer's, since boot
  *   GET  /v1/runs/:id                                       → { status, stage, answer?, evidence?, error? }
  *   GET  /v1/runs/:id/chain                                 → the chain export (download)
  */
@@ -196,6 +197,10 @@ export function createHandler(d: Deps): (req: Request) => Promise<Response> {
             log("run_failed", { id, errorType: st.error.type, ...(st.runId ? { runId: st.runId } : {}) }); // never e.message: may echo api detail
           });
         return json(202, { id }, cors);
+      }
+      if (route === "GET /v1/runs") {
+        const mine = [...runs].filter(([, r]) => r.customer === who).reverse(); // Map keeps insertion order
+        return json(200, { runs: mine.map(([id, { customer: _c, chain: _ch, ...pub }]) => ({ id, ...pub })) }, cors);
       }
       const m = /^\/v1\/runs\/([0-9a-f-]{36})(\/chain)?$/.exec(url.pathname);
       if (req.method === "GET" && m) {

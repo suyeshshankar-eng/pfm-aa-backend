@@ -42,6 +42,24 @@ Set `TEE_AGENT_URL` on `aa-backend` (e.g. `http://<tee-vm-ip>:8081`) to
 auto-trigger a categorisation run on consent approval; unset, the backend
 just skips the trigger (useful for local runs with no TEE agent reachable).
 
+### Insights through Airlock
+
+Built with `--dart-define=FIU_ACCESS_KEY=<key>`, the app runs the PFM agent
+through Airlock instead, via `pfm-fiu-backend` in airlock mode on :8787
+(the key is that backend's `PFM_ACCESS_KEY_FILE`):
+
+```sh
+flutter run --dart-define=FIU_ACCESS_KEY=$(cat <path>/access.key)
+```
+
+Home then shows **Get my insights**, which starts a run on consent
+`sandbox-ok` (`FIU_CONSENT_ID`) and shows the answer with its Airlock
+evidence, and **Insights history**, which lists past runs from
+`GET /v1/runs` and opens each without starting a new one. `FIU_BASE`
+overrides the backend address (default `http://10.0.2.2:8787`). Without the
+key, the app reads aa-backend's TEE result as before. The key is compiled into
+the app, which is fine for the demo; it must never be set in a release build.
+
 `tee-agent/` needs a GCP project with Compute + Artifact Registry +
 Confidential Computing APIs enabled, and a Confidential VM created with
 Secure Boot on, port 8081 reachable from `aa-backend` — see inline comments

@@ -14,6 +14,50 @@ import 'package:http/http.dart' as http;
 // 10.0.2.2 is the Android emulator's alias for the host machine's localhost.
 const apiBase = 'http://10.0.2.2:8788';
 
+// pfm-fiu-backend in Airlock mode. With FIU_ACCESS_KEY set at build time
+// (--dart-define=FIU_ACCESS_KEY=...), the insights panel runs the PFM agent
+// through Airlock instead of reading aa-backend's TEE result. Airlock's AA is
+// Sahamati's sandbox AA, so the run uses its consent FIU_CONSENT_ID, not this
+// app's consent id. Demo only: FIU_ACCESS_KEY is compiled into the app and
+// must never be set in a release build.
+const fiuBase = String.fromEnvironment('FIU_BASE', defaultValue: 'http://10.0.2.2:8787');
+const fiuAccessKey = String.fromEnvironment('FIU_ACCESS_KEY');
+const fiuConsentId = String.fromEnvironment('FIU_CONSENT_ID', defaultValue: 'sandbox-ok');
+
+Future<Map> _fiuCall(String method, String path, {Map<String, String> headers = const {}, Object? body}) async {
+  final uri = Uri.parse('$fiuBase$path');
+  final h = {'content-type': 'application/json', ...headers};
+  final res = method == 'GET' ? await http.get(uri, headers: h) : await http.post(uri, headers: h, body: jsonEncode(body));
+  if (res.statusCode >= 300) throw ApiException('FIU backend ${res.statusCode}: ${res.body}');
+  return jsonDecode(res.body) as Map;
+}
+
+Future<Map<String, String>> _fiuAuth() async {
+  final session = await _fiuCall('POST', '/v1/session', headers: {'x-access-key': fiuAccessKey}, body: {'customerId': 'customer-test-aa-mobile'});
+  return {'authorization': 'Bearer ${session['token']}'};
+}
+
+/// An ISO time as the device's local 'YYYY-MM-DD HH:MM'.
+String localTime(Object? iso) => DateTime.parse('$iso').toLocal().toString().substring(0, 16);
+
+/// This customer's runs on pfm-fiu-backend, newest first (it keeps them in memory, so a restart clears them).
+Future<List<Map>> airlockHistory() async =>
+    ((await _fiuCall('GET', '/v1/runs', headers: await _fiuAuth()))['runs'] as List).cast<Map>();
+
+/// Starts a run on pfm-fiu-backend and polls it, as pfm-client's airlockRuns.ts does.
+Future<Map> runViaAirlock(void Function(String stage) onStage) async {
+  final call = _fiuCall;
+  final auth = await _fiuAuth();
+  final run = await call('POST', '/v1/runs', headers: auth, body: {'consentId': fiuConsentId});
+  for (;;) {
+    await Future.delayed(const Duration(seconds: 3));
+    final r = await call('GET', '/v1/runs/${run['id']}', headers: auth);
+    onStage('${r['stage']}');
+    if (r['status'] == 'completed') return r;
+    if (r['status'] == 'failed') throw ApiException('Airlock run failed: ${jsonEncode(r['error'])}');
+  }
+}
+
 void main() => runApp(const AaDemoApp());
 
 class AaDemoApp extends StatelessWidget {
@@ -121,6 +165,9 @@ class IdentifiersSub extends HomeSub { final String fipId; IdentifiersSub(this.f
 class BankOtpSub extends HomeSub { final String linkRefNumber; BankOtpSub(this.linkRefNumber); }
 class AccountSelectSub extends HomeSub { final String linkRefNumber; final List<Account> accounts; AccountSelectSub(this.linkRefNumber, this.accounts); }
 class LinkSuccessSub extends HomeSub { final List<Account> linked; LinkSuccessSub(this.linked); }
+class InsightsSub extends HomeSub {}
+class InsightsHistorySub extends HomeSub {}
+class InsightsRunSub extends HomeSub { final Map run; InsightsRunSub(this.run); }
 class ConsentDetailSub extends HomeSub { final ConsentDetail consent; ConsentDetailSub(this.consent); }
 
 class RootScreen extends StatefulWidget {
@@ -332,12 +379,19 @@ class _RootScreenState extends State<RootScreen> {
 
   Widget _homeTab() {
     final subtitle = 'Mobile ending ${mobile.isNotEmpty ? mobile.substring(mobile.length - 4) : "----"}';
+    final insightsButton = fiuAccessKey.isEmpty ? <Widget>[] : [
+      _primaryButton('Get my insights', () => setScreen(HomeScreen(tab: 0, sub: InsightsSub()))),
+      const SizedBox(height: 8),
+      OutlinedButton(onPressed: () => setScreen(HomeScreen(tab: 0, sub: InsightsHistorySub())), child: const Text('Insights history')),
+      const SizedBox(height: 16),
+    ];
 
     if (linkedAccounts.isEmpty) {
       return _screenBody(
         title: 'Hello!',
         subtitle: subtitle,
         children: [
+          ...insightsButton,
           Card(
             child: Padding(
               padding: const EdgeInsets.all(16),
@@ -360,6 +414,7 @@ class _RootScreenState extends State<RootScreen> {
       title: 'Hello!',
       subtitle: subtitle,
       children: [
+        ...insightsButton,
         Card(
           color: Theme.of(context).colorScheme.primary,
           child: Padding(
@@ -602,6 +657,33 @@ class _RootScreenState extends State<RootScreen> {
         const SizedBox(height: 16),
         _primaryButton('Done', () => setScreen(HomeScreen(tab: 2))),
       ]);
+    }
+
+    if (sub is InsightsSub) {
+      return _screenBody(
+        leading: _backButton(() => back(null)),
+        title: 'Your insights',
+        subtitle: 'Runs the PFM agent in Airlock on consent $fiuConsentId',
+        children: [_InsightsPanel(api: api, consentId: fiuConsentId)],
+      );
+    }
+
+    if (sub is InsightsHistorySub) {
+      return _screenBody(
+        leading: _backButton(() => back(null)),
+        title: 'Insights history',
+        subtitle: 'Your Airlock runs since the FIU backend last started',
+        children: [_InsightsHistory(onOpen: (r) => back(InsightsRunSub(r)))],
+      );
+    }
+
+    if (sub is InsightsRunSub) {
+      return _screenBody(
+        leading: _backButton(() => back(InsightsHistorySub())),
+        title: 'Insights',
+        subtitle: 'Started ${localTime(sub.run['startedAt'])}',
+        children: [_InsightsPanel(api: api, consentId: fiuConsentId, run: sub.run)],
+      );
     }
 
     if (sub is ConsentDetailSub) {
@@ -847,7 +929,9 @@ class _OtpRowState extends State<_OtpRow> {
 class _InsightsPanel extends StatefulWidget {
   final Api api;
   final String consentId;
-  const _InsightsPanel({required this.api, required this.consentId});
+  /// A finished run from history: shown as is, nothing started.
+  final Map? run;
+  const _InsightsPanel({required this.api, required this.consentId, this.run});
   @override
   State<_InsightsPanel> createState() => _InsightsPanelState();
 }
@@ -856,16 +940,34 @@ class _InsightsPanelState extends State<_InsightsPanel> {
   bool loading = true;
   String? error;
   Map? insights;
+  Map? evidence;
+  String stage = '';
 
   @override
   void initState() {
     super.initState();
-    _load();
+    final r = widget.run;
+    if (r == null) {
+      _load();
+    } else {
+      loading = false;
+      if (r['status'] == 'completed') {
+        insights = r['answer'] as Map;
+        evidence = r['evidence'] as Map?;
+      } else {
+        error = r['status'] == 'failed' ? 'Run failed: ${jsonEncode(r['error'])}' : 'Still running (${r['stage']})';
+      }
+    }
   }
 
   Future<void> _load() async {
-    setState(() { loading = true; error = null; });
+    setState(() { loading = true; error = null; stage = ''; });
     try {
+      if (fiuAccessKey.isNotEmpty) {
+        final r = await runViaAirlock((s) { if (mounted) setState(() => stage = s); });
+        setState(() { insights = r['answer'] as Map; evidence = r['evidence'] as Map?; });
+        return;
+      }
       final body = await widget.api.get('/v1/fi/insights/${widget.consentId}');
       setState(() => insights = body);
     } catch (e) {
@@ -878,7 +980,13 @@ class _InsightsPanelState extends State<_InsightsPanel> {
   @override
   Widget build(BuildContext context) {
     if (loading) {
-      return const Padding(padding: EdgeInsets.only(top: 24), child: Center(child: CircularProgressIndicator()));
+      return Padding(
+        padding: const EdgeInsets.only(top: 24),
+        child: Column(children: [
+          const Center(child: CircularProgressIndicator()),
+          if (fiuAccessKey.isNotEmpty) ...[const SizedBox(height: 12), Text('Airlock run: ${stage.isEmpty ? 'starting' : stage}')],
+        ]),
+      );
     }
     if (insights == null) {
       return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -912,6 +1020,15 @@ class _InsightsPanelState extends State<_InsightsPanel> {
         const SizedBox(width: 10),
         Expanded(child: _statTile('Spend', '₹${summary['total_spend']}')),
       ]),
+      if (evidence != null) ...[
+        const SizedBox(height: 16),
+        const Text('Airlock evidence', style: TextStyle(fontWeight: FontWeight.bold)),
+        const SizedBox(height: 4),
+        Text('Run ${evidence!['runId']} · ${evidence!['environment']} · consent ${evidence!['consentId']}', style: const TextStyle(fontSize: 11)),
+        Text('Agent ${evidence!['agentDigest']}', style: const TextStyle(fontSize: 11), maxLines: 1, overflow: TextOverflow.ellipsis),
+        const SizedBox(height: 4),
+        Text((evidence!['receipts'] as List).map((r) => r['type']).join(' → '), style: const TextStyle(fontSize: 11)),
+      ],
       const SizedBox(height: 16),
       const Text('Top categories', style: TextStyle(fontWeight: FontWeight.bold)),
       const SizedBox(height: 8),
@@ -946,5 +1063,42 @@ class _InsightsPanelState extends State<_InsightsPanel> {
           const SizedBox(height: 4),
           Text(value, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
         ]),
+      );
+}
+
+class _InsightsHistory extends StatefulWidget {
+  final void Function(Map run) onOpen;
+  const _InsightsHistory({required this.onOpen});
+  @override
+  State<_InsightsHistory> createState() => _InsightsHistoryState();
+}
+
+class _InsightsHistoryState extends State<_InsightsHistory> {
+  late Future<List<Map>> runs = airlockHistory();
+
+  @override
+  Widget build(BuildContext context) => FutureBuilder<List<Map>>(
+        future: runs,
+        builder: (context, snap) {
+          if (snap.hasError) return Text('${snap.error is ApiException ? (snap.error as ApiException).message : snap.error}');
+          if (!snap.hasData) return const Padding(padding: EdgeInsets.only(top: 24), child: Center(child: CircularProgressIndicator()));
+          if (snap.data!.isEmpty) return const Text('No runs yet. Tap "Get my insights" on Home.');
+          return Column(children: [
+            for (final r in snap.data!)
+              Card(
+                margin: const EdgeInsets.only(bottom: 8),
+                child: ListTile(
+                  title: Text(r['status'] == 'completed'
+                      ? 'Spend ₹${(r['answer'] as Map)['summary']['total_spend']} · Income ₹${(r['answer'] as Map)['summary']['total_income']}'
+                      : '${r['status']}'),
+                  subtitle: Text('${localTime(r['startedAt'])}\n${r['evidence']?['environment'] ?? ''} · consent ${r['consentId']}${r['runId'] != null ? ' · run ${'${r['runId']}'.substring(0, 8)}' : ''}'),
+                  isThreeLine: true,
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => widget.onOpen(r),
+                ),
+              ),
+            OutlinedButton(onPressed: () => setState(() => runs = airlockHistory()), child: const Text('Refresh')),
+          ]);
+        },
       );
 }

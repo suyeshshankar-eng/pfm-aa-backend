@@ -1,0 +1,7 @@
+# AA credentials: baked into the image, never committed.
+.secrets/
+# Model weights and training data are not in git; see README "Not in this repo".
+models/
+training/labels.jsonl
+__pycache__/
+.DS_Store

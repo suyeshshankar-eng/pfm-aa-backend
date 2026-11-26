@@ -155,12 +155,18 @@ test("server: POST /v1/runs is async; GET returns the answer and evidence; chain
   expect(done.answer.spend).toBe(42);
   expect(done.chain).toBeUndefined(); // chain only via the download route
   expect(done.evidence).toMatchObject({ runId: RUN, environment: "sandbox", agentDigest: DIGEST, consentId: "sandbox-ok", independentlyVerified: false, receipts: [{ type: "enclave.attested", at: "2026-11-20T00:00:00Z" }, { type: "data.deleted" }] });
+  const list: any = await (await s.req("GET", "/v1/runs", tok)).json();
+  expect(list.runs).toHaveLength(1);
+  expect(list.runs[0]).toMatchObject({ id, status: "completed", answer: { spend: 42 } });
+  expect(list.runs[0].chain).toBeUndefined();
+  expect(list.runs[0].customer).toBeUndefined();
   const chain = await s.req("GET", `/v1/runs/${id}/chain`, tok);
   expect(chain.headers.get("content-disposition")).toContain(`run-${RUN}.chain.json`);
   expect(s.logs.join("\n")).not.toContain("ZZZ-MARKER");
   // another customer cannot read it
   const other = await login(s, "customer-test-002");
   expect((await s.req("GET", `/v1/runs/${id}`, other)).status).toBe(404);
+  expect(((await (await s.req("GET", "/v1/runs", other)).json()) as any).runs).toEqual([]);
   expect((await s.req("GET", `/v1/runs/${id}`)).status).toBe(401);
 });
 

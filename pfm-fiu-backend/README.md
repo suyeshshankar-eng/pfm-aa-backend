@@ -46,7 +46,8 @@ today's PFM worker, which does not yet accept schema-2 jobs.
 Per Octic's handoff (Airlock ≥ 1.0.0-beta.44, org `kaushal-agent-test`). The backend does every Airlock step —
 login, start run (`consentId` + `fiDataRange` in the clear), find the row, sign the request, poll, fetch and open the
 reply (HPKE, `src/hpke.ts`), save the chain — and the app only calls `POST /v1/runs` and polls `GET /v1/runs/:id`
-(`/chain` downloads the evidence). `src/airlock.ts` is the client; tests run it against a fake Airlock that checks the
+(`/chain` downloads the evidence). `GET /v1/runs` lists the customer's runs since the backend started, newest first,
+for the app's history screen. `src/airlock.ts` is the client; tests run it against a fake Airlock that checks the
 presentations' signatures, claims and the HPKE `info`.
 
 ```sh
@@ -68,8 +69,9 @@ bun src/main.ts
   revoked key. Run from your own shell: the system key is an admin key.
 - Allowed consent ids default to `sandbox-ok,sandbox-manual` (`PFM_AIRLOCK_CONSENT_IDS`); the range is the last 90
   days. `sandbox-manual` waits for a human at Octic's mock AA screen: the AA fetch gives up after 5 minutes.
-- **Not verified against the real API.** The handoff says its own script was not run either. Needs the workload id and
-  version digest from Octic, a published reply key, and the agent. Receipt timestamps are shown only if a receipt body
+- **Verified against the real API** on 2026-11-23 (`sandbox-ok`): app → backend → Airlock → opened reply in about
+  12 s, 19 receipts, api verdict ok. Octic's development api (`api.airlock-development.gcp.octichq.com`) does
+  not know this org (`INVALID_ASSERTION unknown_issuer`). `sandbox-manual` not yet run through the backend. Receipt timestamps are shown only if a receipt body
   carries a string `issued_at`/`timestamp`/`at`/`time` (field names unconfirmed). The api `verdict` is passed through as
   "not independently verified".
 - Dependency added: `@noble/ciphers` (Bun's `node:crypto` lacks ChaCha20-Poly1305). HPKE open is cross-checked against a
